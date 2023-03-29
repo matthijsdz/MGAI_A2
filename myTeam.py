@@ -127,7 +127,7 @@ class DummyAgent(CaptureAgent):
     root = Node(gameState, self.index)
     
     #with mp.Pool(processes=mp.cpu_count()) as pool:
-    while time.time() - start < 1:
+    while time.time() - start < 0.9:
         self.treeExpansion(root,gameState)
         #args=[(root,gameState)] * mp.cpu_count()
         #pool.map(self.treeExpansion, args)
@@ -161,42 +161,52 @@ class Node:
 
     def ucb(self):
         c = np.sqrt(2)
-        ucb=self.inter_w / -self.n + c * np.sqrt(np.log(self.parent.n) / self.n)
+        ucb = -self.inter_w / self.n +  c * np.sqrt(np.log(self.parent.n) / self.n)
         return ucb
 
     def getHeuristic(self):
-      if(self.state.getAgentState(self.agent_index).isPacman):
-        alpha= 0.1
-      else:
-        alpha= 0.01
-      food_distance=np.inf
-      if(self.state.getAgentState(self.agent_index).isPacman):
-        beta=0.0
-      else:
-        beta=0.01
-      horizontal_dist=np.inf
-      
-      gamma = 0.01
-      capsule_distance =0
-
-      delta = 0.01
-      carrying_food = 0
-
-      epsilon = 0.01
-      scared_ghost_distance = 0
-
-
-      myPos = self.state.getAgentPosition(self.agent_index)
       #Team Red
       if(self.agent_index%2==0):
           food_matrix=self.state.getBlueFood()
           caps_matrix=self.state.getBlueCapsules()
-          opp_ind=self.state.getRedTeamIndices()
+          opp_ind=self.state.getBlueTeamIndices()
+          team_ind=self.state.getRedTeamIndices()
       #Team Blue
       else:
           food_matrix =self.state.getRedFood()
           caps_matrix=self.state.getRedCapsules()
-          opp_ind=self.state.getBlueTeamIndices()
+          opp_ind=self.state.getRedTeamIndices()
+          team_ind=self.state.getBlueTeamIndices()
+      max_distance = food_matrix.width + food_matrix.height
+       #Attacking agent
+      if(self.agent_index==team_ind[0]):
+        c=1.0
+        alpha=0.5
+        beta=0.4
+        gamma=0.0
+        delta=0.0
+        epsilon=0.2
+        zeta=0.2
+        tau=0.0
+      #Defending Agents
+      else:
+        c=1.0
+        alpha=0.4
+        beta=0.4
+        gamma=0.2
+        delta=0.2
+        epsilon=0.0
+        zeta=0.0
+        tau=0.5
+      food_distance=np.inf
+      horizontal_dist=np.inf
+      capsule_distance =0
+      carrying_food = 0
+      scared_ghost_distance = 0
+      non_scared_ghost_distance=0
+      pacman_distance=0
+      myPos = self.state.getAgentPosition(self.agent_index)
+
       for x in range(food_matrix.width):
         for y in range(food_matrix.height):
           if(food_matrix[x][y]==True):
@@ -214,17 +224,29 @@ class Node:
             carrying_food += opponent.numCarrying
 
       for opponent in opponents:
-        if opponent.scaredTimer > 0:
-            if(scared_ghost_distance == 0):
-              scared_ghost_distance = np.inf
-            scared_ghost_distance = min(scared_ghost_distance, (abs(myPos[0]-opponent.getPosition()[0])+abs(myPos[1]-opponent.getPosition()[1])))
-
+        if(opponent.getPosition()==None):
+          continue
+        if opponent.isPacman:
+            if(pacman_distance==0):
+              pacman_distance=np.inf
+            pacman_distance = min(pacman_distance, (abs(myPos[0] - opponent.getPosition()[0]) + abs(myPos[1] - opponent.getPosition()[1])))
+        if opponent.scaredTimer > 0 and not(opponent.isPacman):
+          if(scared_ghost_distance == 0):
+            scared_ghost_distance = np.inf
+          scared_ghost_distance = min(scared_ghost_distance, (abs(myPos[0]-opponent.getPosition()[0])+abs(myPos[1]-opponent.getPosition()[1])))
+        if opponent.scaredTimer == 0 and not(opponent.isPacman):
+          if(non_scared_ghost_distance == 0):
+            non_scared_ghost_distance = np.inf
+          non_scared_ghost_distance = min(non_scared_ghost_distance, (abs(myPos[0]-opponent.getPosition()[0])+abs(myPos[1]-opponent.getPosition()[1])))
       heuristic_value =(
-      - alpha * food_distance
-      - beta * horizontal_dist 
-      - gamma * capsule_distance
-      - delta * carrying_food
-      - epsilon * scared_ghost_distance)
+        c * self.w
+        - alpha * food_distance/max_distance
+        - beta * horizontal_dist/food_matrix.width 
+        - gamma * capsule_distance/max_distance
+        - delta * carrying_food
+        - epsilon * scared_ghost_distance/max_distance
+        + zeta * non_scared_ghost_distance/max_distance
+        - tau * pacman_distance)
       return  heuristic_value
                              
     def select(self,gameState, depth):
