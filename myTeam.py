@@ -73,8 +73,11 @@ class DummyAgent(CaptureAgent):
     '''
     CaptureAgent.registerInitialState(self, gameState)
     self.num_agents = len(gameState.data.agentStates)
-    self.depth = 5
+    self.depth = 7
     self.M = 20
+    self.epsilon=1.0
+    self.decay_factor=0.995
+    self.min_epsilon=0.1
     #self.distancer.getDistance(p1, p2)
     '''
     Your initialization code goes here, if you need any.
@@ -83,7 +86,6 @@ class DummyAgent(CaptureAgent):
   def simulate(self, node, depth):
       if depth == 0 or node.state.isOver():
           return self.getScore(node.state), node.getHeuristic();
-
       actions = node.state.getLegalActions(node.agent_index)
       total_reward = 0
       total_inter_reward=0
@@ -96,41 +98,39 @@ class DummyAgent(CaptureAgent):
       return total_reward / num_sims, total_inter_reward/num_sims
     
   def egreedy_action(self,actions,node):
-    epsilon=1.0
-    inter_w=-np.inf
-    next_agent = (node.agent_index) % self.num_agents
-    if(random.uniform(0,1)<epsilon):
+    self.epsilon=max(self.decay_factor*self.epsilon, self.min_epsilon)
+    max_value=-np.inf
+    if(random.uniform(0,1)<self.epsilon):
       action = random.choice(actions)
       next_state =node.state.generateSuccessor(node.agent_index, action)
-      next_node = Node(next_state, next_agent, node, action)
+      next_node = Node(next_state, node.agent_index, node, action)
     else:
       for action in actions:
         temp_state = node.state.generateSuccessor(node.agent_index, action)
-        temp_node = Node(temp_state, next_agent, node, action)
-        next_value = temp_node.inter_w
-        if(next_value>inter_W):
-          next_node=temp_node
-          inter_w=next_value
+        temp_node = Node(temp_state, node.agent_index, node, action)
+        next_value = temp_node.getHeuristic()  
+        if(next_value >= max_value):
+          next_node = temp_node
+          max_value = next_value
     return next_node
   
   #Multiprocessing
   def treeExpansion(self,root, gameState):
-        node, depth= root.select(gameState,self.depth)
-        node.expand(node.state, node.state.getLegalActions(node.agent_index), self.num_agents)
-        child = random.choice(node.children)
-        full_result,inter_result = self.simulate(child, depth)
+        node, depth= root.select(self.depth)
+        node=node.expand(node.state, node.state.getLegalActions(node.agent_index), self.num_agents)
+        full_result,inter_result = self.simulate(node, depth)
         node.backpropagate(full_result,inter_result)
-    
+        i=0
   def chooseAction(self, gameState):
     start = time.time()
 
     root = Node(gameState, self.index)
     
     #with mp.Pool(processes=mp.cpu_count()) as pool:
-    while time.time() - start < 0.9:
+    for i in range(self.M):
         self.treeExpansion(root,gameState)
-        #args=[(root,gameState)] * mp.cpu_count()
-        #pool.map(self.treeExpansion, args)
+        #args=[(root,gameState)] #* mp.cpu_count()
+        #pool.apply_async(self.treeExpansion, args=(root, gameState), callback=lambda node: root.children.append(node))
     #threshold = 2
     #root.prune(threshold)
     
@@ -141,10 +141,8 @@ class DummyAgent(CaptureAgent):
     actions = gameState.getLegalActions(self.index)
 
     print('eval time for agent %d: %.4f' % (self.index, time.time() - start))
-    [print(child.inter_w) for child in root.children]
-    [print(child.pos) for child in root.children]
-    print(actions)
-    print(max(root.children, key=lambda child: child.n).n, min(root.children, key=lambda child: child.n).n)
+    #[print(child.ucb()) for child in root.children]
+    #print(actions)
     return max(root.children, key=lambda child: child.inter_w).action
       
 class Node:
@@ -153,6 +151,7 @@ class Node:
         self.agent_index = agent_index
         self.parent = parent
         self.children = []
+        self.unvisited_children=[]
         self.w = 0
         self.n = 1
         self.action = action
@@ -161,7 +160,8 @@ class Node:
 
     def ucb(self):
         c = np.sqrt(2)
-        ucb = -self.inter_w / self.n +  c * np.sqrt(np.log(self.parent.n) / self.n)
+        ucb = self.w / self.n +  c * np.sqrt(np.log(self.parent.n) / self.n)
+
         return ucb
 
     def getHeuristic(self):
@@ -182,7 +182,11 @@ class Node:
       if(self.agent_index==team_ind[0]):
         c=1.0
         alpha=0.5
-        beta=0.4
+        if(self.state.getAgentState(self.agent_index).numCarrying>0):
+          beta=-0.4
+        else:
+          beta=0.4
+        beta=0.7
         gamma=0.0
         delta=0.0
         epsilon=0.2
@@ -192,12 +196,16 @@ class Node:
       else:
         c=1.0
         alpha=0.4
-        beta=0.4
+        if(self.state.getAgentState(self.agent_index).numCarrying>0):
+          beta=-0.4
+        else:
+          beta=0.4
+        beta=0.7
         gamma=0.2
         delta=0.2
         epsilon=0.0
         zeta=0.0
-        tau=0.5
+        tau=0.3
       food_distance=np.inf
       horizontal_dist=np.inf
       capsule_distance =0
@@ -238,7 +246,8 @@ class Node:
           if(non_scared_ghost_distance == 0):
             non_scared_ghost_distance = np.inf
           non_scared_ghost_distance = min(non_scared_ghost_distance, (abs(myPos[0]-opponent.getPosition()[0])+abs(myPos[1]-opponent.getPosition()[1])))
-      heuristic_value =(
+
+      heuristic_value =(0.5+
         c * self.w
         - alpha * food_distance/max_distance
         - beta * horizontal_dist/food_matrix.width 
@@ -248,16 +257,27 @@ class Node:
         + zeta * non_scared_ghost_distance/max_distance
         - tau * pacman_distance)
       return  heuristic_value
+      """
+      print("W",c*self.w, "innit_w", - alpha * food_distance/max_distance
+        - beta * horizontal_dist/food_matrix.width 
+        - gamma * capsule_distance/max_distance
+        - delta * carrying_food
+        - epsilon * scared_ghost_distance/max_distance
+        + zeta * non_scared_ghost_distance/max_distance
+        - tau * pacman_distance)
+      """
+
                              
-    def select(self,gameState, depth):
+    def select(self, depth):
         if depth == 0 or self.state.isOver():
             return self, depth
         if len(self.children) == 0:
             return self, depth
         #or based on ucb()
-        next_node = max(self.children, key=lambda child: child.ucb())
-        next_state = gameState.generateSuccessor(self.agent_index, next_node.action)
-        return next_node.select(next_state,depth - 1)
+        if self.children:
+          node=max(self.children, key=lambda child: child.ucb())
+          #next_state = gameState.generateSuccessor(self.agent_index, next_node.action)
+          return node.select(depth-1)
 
     def expand(self, gameState, actions, num_agents):
         if len(self.children) > 0:
@@ -269,12 +289,13 @@ class Node:
           next_state = gameState.generateSuccessor(self.agent_index, action)
           child = Node(next_state, next_agent, self, action)
           self.children.append(child)
+        return random.choice(self.children)
 
     def backpropagate(self, reward,inter_reward):
+        self.n += 1
+        self.w += reward
+        self.inter_w = max(inter_reward,self.inter_w)
         if(not(self.parent==None)):
-          self.n += 1
-          self.w += reward
-          self.inter_w = max(inter_reward,self.inter_w)
           self.parent.backpropagate(reward,inter_reward);
         
     def prune(self, threshold):
