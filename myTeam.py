@@ -73,7 +73,7 @@ class DummyAgent(CaptureAgent):
     '''
     CaptureAgent.registerInitialState(self, gameState)
     self.num_agents = len(gameState.data.agentStates)
-    self.depth = 7
+    self.depth = 5
     self.M = 20
     self.epsilon=1.0
     self.decay_factor=0.995
@@ -92,6 +92,7 @@ class DummyAgent(CaptureAgent):
       num_sims = min(len(actions), self.M)
       for _ in range(num_sims):
           next_node= self.egreedy_action(actions,node)
+          
           reward,inter_reward = self.simulate(next_node, depth - 1)
           total_reward += reward
           total_inter_reward+=inter_reward
@@ -121,6 +122,7 @@ class DummyAgent(CaptureAgent):
         full_result,inter_result = self.simulate(node, depth)
         node.backpropagate(full_result,inter_result)
         i=0
+
   def chooseAction(self, gameState):
     start = time.time()
 
@@ -141,9 +143,9 @@ class DummyAgent(CaptureAgent):
     actions = gameState.getLegalActions(self.index)
 
     print('eval time for agent %d: %.4f' % (self.index, time.time() - start))
-    #[print(child.ucb()) for child in root.children]
-    #print(actions)
-    return max(root.children, key=lambda child: child.inter_w).action
+    [print(child.ucb()) for child in root.children]
+    print(actions)
+    return max(root.children, key=lambda child: child.inter_w/child.n).action
       
 class Node:
     def __init__(self, state, agent_index, parent=None, action=None):
@@ -160,6 +162,7 @@ class Node:
 
     def ucb(self):
         c = np.sqrt(2)
+        self.getHeuristic();
         ucb = self.w / self.n +  c * np.sqrt(np.log(self.parent.n) / self.n)
 
         return ucb
@@ -294,7 +297,7 @@ class Node:
     def backpropagate(self, reward,inter_reward):
         self.n += 1
         self.w += reward
-        self.inter_w = max(inter_reward,self.inter_w)
+        self.inter_w += inter_reward
         if(not(self.parent==None)):
           self.parent.backpropagate(reward,inter_reward);
         
