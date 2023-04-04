@@ -87,6 +87,7 @@ class DummyAgent(CaptureAgent):
       if depth == 0 or node.state.isOver():
           return self.getScore(node.state), node.getHeuristic();
       actions = node.state.getLegalActions(node.agent_index)
+      actions.remove("Stop");
       total_reward = 0
       total_inter_reward=0
       num_sims = min(len(actions), self.M)
